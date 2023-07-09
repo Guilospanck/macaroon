@@ -37,10 +37,41 @@ pub fn generate_keys() -> AsymmetricKeys {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum CaveatType {
   FirstParty,
   ThirdParty,
+}
+
+pub struct Verifier {
+  predicates: Vec<String>,
+  callbacks: Vec<fn()>,
+}
+
+impl Verifier {
+  pub fn new() -> Verifier {
+    Verifier {
+      predicates: vec![],
+      callbacks: vec![],
+    }
+  }
+
+  pub fn satisfy_exact(&mut self, predicate: &str) -> &mut Self {
+    self.predicates.push(predicate.to_string());
+    self
+  }
+
+  pub fn satisfy_general(&mut self, func: fn()) {
+    self.callbacks.push(func);
+  }
+
+  fn verify_exact(&self, predicate: &str) -> bool {
+    self.predicates.contains(&predicate.to_string())
+  }
+
+  pub fn verify(&self, _macaroon: Macaroon) -> bool {
+    true
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +80,31 @@ pub struct Caveat {
   pub identifier: String,
   pub verification_key_identifier: String,
   _type: CaveatType,
+}
+
+impl Caveat {
+  fn first_party(&self) -> bool {
+    self._type == CaveatType::FirstParty
+  }
+
+  fn third_party(&self) -> bool {
+    self._type == CaveatType::ThirdParty
+  }
+
+  pub fn get_signature(&self, prev_signature: &str) -> String {
+    if self.first_party() {
+      return Macaroon::get_new_signature(prev_signature, &self.identifier);
+    }
+
+    if self.third_party() {
+      let first = Macaroon::get_new_signature(prev_signature, &self.verification_key_identifier);
+      let second = Macaroon::get_new_signature(prev_signature, &self.identifier);
+      let concatenated = format!("{}{}", first, second);
+      return Macaroon::get_new_signature(prev_signature, &concatenated);
+    }
+
+    panic!("Expected a caveat of first or third party")
+  }
 }
 
 pub struct Macaroon {
@@ -67,8 +123,8 @@ impl Macaroon {
   /// Returns a Macaroon with these data plus
   /// a valid signature (sig = `HMAC(root_key, identifier)`) and an
   /// empty list of caveats.
-  /// 
-  pub fn new(root_key: &str, identifier: &str, location: Option<&str>) -> Self {
+  ///
+  pub fn create(root_key: &str, identifier: &str, location: Option<&str>) -> Self {
     let location: Option<String> = location.map(|loc| loc.to_string());
 
     let signature = Self::get_new_signature(root_key, identifier);
@@ -84,27 +140,16 @@ impl Macaroon {
   /// Adds caveat to the list of caveats in the Macaroon and
   /// generates the new signature accordingly to the type of
   /// caveat (First Party or Third Party).
-  /// 
+  ///
   fn add_caveat_helper(&mut self, caveat: Caveat) -> &mut Self {
     self.caveat_list.push(caveat.clone());
-
-    match caveat._type {
-      CaveatType::FirstParty => {
-        self.signature = Self::get_new_signature(&self.signature, &caveat.identifier);
-      }
-      CaveatType::ThirdParty => {
-        let first = Self::get_new_signature(&self.signature, &caveat.verification_key_identifier);
-        let second = Self::get_new_signature(&self.signature, &caveat.identifier);
-        let concatenated = format!("{}{}", first, second);
-        self.signature = Self::get_new_signature(&self.signature, &concatenated);
-      }
-    }
+    self.signature = caveat.get_signature(&self.signature);
     self
   }
 
   /// Adds first party caveat to the Macaroon and returns a
   /// mutable reference (fluent interface).
-  /// 
+  ///
   pub fn add_first_party_caveat(&mut self, authorisation_predicate: &str) -> &mut Self {
     self.add_caveat_helper(Caveat {
       location: None,
@@ -114,12 +159,20 @@ impl Macaroon {
     })
   }
 
+  // verify
+  // - calculate first signature from `root_key` and `identifier`
+  // - for each caveat, check predicate and calculate new signature
+  // - check signatures match
+  pub fn verify(&self) -> bool {
+    true
+  }
+
   pub fn serialize(&self) -> String {
     "".to_string()
   }
 
   /// Helper to HMAC-hash an identifier using a secret.
-  /// 
+  ///
   fn get_new_signature(secret: &str, identifier: &str) -> String {
     let mut mac =
       HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
@@ -143,7 +196,7 @@ mod tests {
     let identifier = "test-id";
     let location = None;
 
-    let macaroon = Macaroon::new(root_key, identifier, location);
+    let macaroon = Macaroon::create(root_key, identifier, location);
 
     let expected_signature = "ca454e90d6598ee2a0ae871ddf58c8b61543c2efbd2e8e58e216095c7cda3ee1";
 
@@ -160,7 +213,7 @@ mod tests {
     let location = Some("https://some.location");
     let authorisation_predicate = "potato = larry";
 
-    let mut macaroon = Macaroon::new(root_key, identifier, location);
+    let mut macaroon = Macaroon::create(root_key, identifier, location);
     macaroon.add_first_party_caveat(authorisation_predicate);
 
     assert_eq!(macaroon.caveat_list.len(), 1);
@@ -181,6 +234,32 @@ mod tests {
     let expected_signature = "e2342be14bf8d8f1f3fc54abfe877a80e446c40437785747096a8233c7aeb8ab";
 
     assert_eq!(macaroon.signature, expected_signature.to_string());
+  }
+
+  #[test]
+  fn verify() {
+    let root_key = "potato";
+    let identifier = "test-id";
+    let location = Some("https://some.location");
+    let authorisation_predicate = "potato = larry";
+
+    let mut macaroon = Macaroon::create(root_key, identifier, location);
+    macaroon.add_first_party_caveat(authorisation_predicate);
+
+    // verify
+    // - calculate first signature from `root_key` and `identifier`
+    // - for each caveat, check predicate and calculate new signature
+    // - check signatures match
+    let predicate_to_verify = "potato = larry";
+    let first_signature = Macaroon::get_new_signature(root_key, identifier);
+    for caveat in macaroon.caveat_list {
+      if caveat.first_party() {
+        // builds new signature
+        let new_signature = Macaroon::get_new_signature(&first_signature, &caveat.identifier);
+      }
+    }
+
+    assert!(true);
   }
 
   #[test]
