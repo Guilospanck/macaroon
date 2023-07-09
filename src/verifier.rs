@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, vec};
 
-use crate::{macaroon::Macaroon};
+use crate::macaroon::Macaroon;
 
 #[derive(thiserror::Error, Debug, PartialEq)]
 pub enum VerifyError {

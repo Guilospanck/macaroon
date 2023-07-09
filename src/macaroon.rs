@@ -1,11 +1,12 @@
 use hmac::{Hmac, Mac};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 use crate::caveat::{Caveat, CaveatType};
 
 // Create alias for HMAC-SHA256
 type HmacSha256 = Hmac<Sha256>;
 
+#[derive(Clone)]
 pub struct Macaroon {
   pub identifier: String,
   pub caveat_list: Vec<Caveat>,
@@ -81,6 +82,13 @@ impl Macaroon {
     })
   }
 
+  /// Binds the discharging to the authorising macaroon.
+  ///
+  fn bind_for_request(&self, discharge_macaroon: &mut Macaroon) {
+    let concatenated = format!("{}{}", discharge_macaroon.signature.clone(), self.signature);
+    discharge_macaroon.signature = Macaroon::hash_with_sha256(&concatenated);
+  }
+
   pub fn serialize(&self) -> String {
     "".to_string()
   }
@@ -99,10 +107,18 @@ impl Macaroon {
     let result = mac.finalize().into_bytes();
     format!("{:x}", result)
   }
+
+  fn hash_with_sha256(data: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data.as_bytes());
+    let result = hasher.finalize();
+    format!("{:x}", result)
+  }
 }
 
 #[cfg(test)]
 mod tests {
+
   use super::*;
 
   #[cfg(test)]
@@ -197,6 +213,56 @@ mod tests {
 
     let expected_signature = "26b9afd2a448190dd2ea1e4e649e6d09250209ad0570aef752d7c83724042d2b";
     assert_eq!(macaroon.signature, expected_signature.to_string());
+  }
+
+  #[test]
+  fn bind_for_request() {
+    let root_key = "potato";
+    let identifier = "test-id";
+    let location = Some("https://macaroon.location");
+    let mut macaroon = Macaroon::create(root_key, identifier, location);
+    let predicate_account_id = "account_id = 007";
+    macaroon.add_first_party_caveat(predicate_account_id);
+
+    // Adds 3rd party caveat to the original macaroon
+    let caveat_discharge_location = Some("https://auth.bank");
+    let caveat_identifier = "caveat-identifier";
+    let caveat_root_key = "caveat-root-key";
+
+    macaroon.add_third_party_caveat(
+      caveat_root_key,
+      caveat_identifier,
+      caveat_discharge_location,
+    );
+
+    // Creates the discharge macaroon that will be responsible for
+    // handling the 3rd party caveat just created.
+    let mut discharge_macaroon = Macaroon::create(
+      caveat_root_key,
+      caveat_identifier,
+      caveat_discharge_location,
+    );
+    let first_party_caveat_of_discharge_macaroon_identifier = "time < 2023-07-09T00:00:00Z";
+    discharge_macaroon.add_first_party_caveat(first_party_caveat_of_discharge_macaroon_identifier);
+
+    // Bind the discharge to the original macaroon
+    let mut bound_macaroon = discharge_macaroon.clone();
+    macaroon.bind_for_request(&mut bound_macaroon);
+
+    let concatenated = format!("{}{}", discharge_macaroon.signature, macaroon.signature);
+    let expected_bound_signature  = Macaroon::hash_with_sha256(&concatenated);
+
+    assert_eq!(bound_macaroon.signature, expected_bound_signature);
+
+    // For integration test
+    // Verifies
+    // let mut verifier = Verifier::default();
+    // // must satisfy first caveat from the original macaroon
+    // verifier.satisfy_exact(predicate_account_id);
+    // // must satisfy the first caveat from the discharge macaroon
+    // verifier.satisfy_exact(first_party_caveat_of_discharge_macaroon_identifier);
+    // assert!(verifier.verify(macaroon, root_key, vec![discharge_macaroon]).is_err());
+    // assert!(verifier.verify(macaroon, root_key, vec![bound_macaroon]).is_ok());
   }
 
   #[test]
