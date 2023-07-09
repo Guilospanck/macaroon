@@ -58,6 +58,29 @@ impl Macaroon {
     })
   }
 
+  /// Adds third party caveat to the Macaroon and returns a
+  /// mutable reference (fluent interface).
+  ///
+  /// A third party caveat is a caveat which must be verified by
+  /// a third party using macaroons that are provided by them.
+  /// They are known as "discharge macaroons".
+  ///
+  pub fn add_third_party_caveat(
+    &mut self,
+    caveat_root_key: &str,
+    identifier: &str,
+    location: Option<&str>,
+  ) -> &mut Self {
+    // vID (verification key identifier): Encrypts the key cK (caveat root key) with the signature of the macaroon as the encryption key;
+    let vid = Macaroon::hmac_sha256(&self.signature, caveat_root_key);
+    self.add_caveat_helper(Caveat {
+      location: location.map(|loc| loc.to_string()),
+      identifier: identifier.to_string(),
+      verification_key_identifier: vid,
+      _type: CaveatType::ThirdParty,
+    })
+  }
+
   pub fn serialize(&self) -> String {
     "".to_string()
   }
@@ -65,9 +88,13 @@ impl Macaroon {
   /// Helper to HMAC-hash an identifier using a secret.
   ///
   pub(crate) fn get_new_signature(secret: &str, identifier: &str) -> String {
+    Macaroon::hmac_sha256(secret, identifier)
+  }
+
+  fn hmac_sha256(secret: &str, data: &str) -> String {
     let mut mac =
       HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
-    let identifier = identifier.to_string();
+    let identifier = data.to_string();
     mac.update(identifier.as_bytes());
     let result = mac.finalize().into_bytes();
     format!("{:x}", result)
@@ -124,6 +151,51 @@ mod tests {
 
     let expected_signature = "e2342be14bf8d8f1f3fc54abfe877a80e446c40437785747096a8233c7aeb8ab";
 
+    assert_eq!(macaroon.signature, expected_signature.to_string());
+  }
+
+  #[test]
+  fn add_third_party_caveat() {
+    let root_key = "potato";
+    let identifier = "test-id";
+    let location = Some("https://macaroon.location");
+    let mut macaroon = Macaroon::create(root_key, identifier, location);
+    let macaroon_signature = macaroon.signature.clone();
+
+    let caveat_discharge_location = Some("https://auth.bank");
+    let caveat_identifier = "caveat-identifier";
+    let caveat_root_key = "caveat-root-key";
+
+    macaroon.add_third_party_caveat(
+      caveat_root_key,
+      caveat_identifier,
+      caveat_discharge_location,
+    );
+
+    let expected_vid = Macaroon::hmac_sha256(&macaroon_signature, caveat_root_key);
+
+    let macaroon_first_caveat = macaroon.caveat_list.first().unwrap();
+
+    assert_eq!(macaroon.caveat_list.len(), 1);
+    assert_eq!(
+      macaroon_first_caveat.identifier,
+      caveat_identifier.to_string()
+    );
+    assert_eq!(
+      macaroon
+        .caveat_list
+        .first()
+        .unwrap()
+        .verification_key_identifier,
+      expected_vid
+    );
+    assert!(macaroon_first_caveat.location.is_some());
+    assert_eq!(
+      macaroon_first_caveat.location,
+      caveat_discharge_location.map(|loc| loc.to_string())
+    );
+
+    let expected_signature = "26b9afd2a448190dd2ea1e4e649e6d09250209ad0570aef752d7c83724042d2b";
     assert_eq!(macaroon.signature, expected_signature.to_string());
   }
 
