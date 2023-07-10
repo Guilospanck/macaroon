@@ -9,3 +9,4 @@
 mod caveat;
 pub mod verifier;
 pub mod macaroon;
+pub mod crypto;
