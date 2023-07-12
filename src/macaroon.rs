@@ -1,10 +1,6 @@
-use hmac::{Hmac, Mac};
+use crate::{caveat::{Caveat, CaveatType}, crypto::Crypto};
+
 use sha2::{Digest, Sha256};
-
-use crate::caveat::{Caveat, CaveatType};
-
-// Create alias for HMAC-SHA256
-type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Clone)]
 pub struct Macaroon {
@@ -73,7 +69,7 @@ impl Macaroon {
     location: Option<&str>,
   ) -> &mut Self {
     // vID (verification key identifier): Encrypts the key cK (caveat root key) with the signature of the macaroon as the encryption key;
-    let vid = Macaroon::hmac_sha256(&self.signature, caveat_root_key);
+    let vid = Crypto::hmac_sha256(&self.signature, caveat_root_key);
     self.add_caveat_helper(Caveat {
       location: location.map(|loc| loc.to_string()),
       identifier: identifier.to_string(),
@@ -83,7 +79,9 @@ impl Macaroon {
   }
 
   /// Binds the discharging to the authorising macaroon.
-  ///
+  /// 
+  /// `M'.sig = sha256(M'.sig || TM.sig)`
+  /// 
   fn bind_for_request(&self, discharge_macaroon: &mut Macaroon) {
     let concatenated = format!("{}{}", discharge_macaroon.signature.clone(), self.signature);
     discharge_macaroon.signature = Macaroon::hash_with_sha256(&concatenated);
@@ -96,16 +94,7 @@ impl Macaroon {
   /// Helper to HMAC-hash an identifier using a secret.
   ///
   pub(crate) fn get_new_signature(secret: &str, identifier: &str) -> String {
-    Macaroon::hmac_sha256(secret, identifier)
-  }
-
-  fn hmac_sha256(secret: &str, data: &str) -> String {
-    let mut mac =
-      HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
-    let identifier = data.to_string();
-    mac.update(identifier.as_bytes());
-    let result = mac.finalize().into_bytes();
-    format!("{:x}", result)
+    Crypto::hmac_sha256(secret, identifier)
   }
 
   fn hash_with_sha256(data: &str) -> String {
@@ -188,7 +177,7 @@ mod tests {
       caveat_discharge_location,
     );
 
-    let expected_vid = Macaroon::hmac_sha256(&macaroon_signature, caveat_root_key);
+    let expected_vid = Crypto::hmac_sha256(&macaroon_signature, caveat_root_key);
 
     let macaroon_first_caveat = macaroon.caveat_list.first().unwrap();
 
@@ -266,7 +255,7 @@ mod tests {
   }
 
   #[test]
-  fn hmac_sha256() {
+  fn get_new_signature() {
     let root_key = "potato";
     let identifier = "test-id";
     let expected_signature = "ca454e90d6598ee2a0ae871ddf58c8b61543c2efbd2e8e58e216095c7cda3ee1";
