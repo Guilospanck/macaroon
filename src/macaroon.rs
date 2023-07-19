@@ -86,8 +86,19 @@ impl Macaroon {
   /// `M'.sig = sha256(M'.sig || TM.sig)`
   ///
   fn bind_for_request(&self, discharge_macaroon: &mut Macaroon) {
-    let concatenated = format!("{}{}", discharge_macaroon.signature.clone(), self.signature);
-    discharge_macaroon.signature = Macaroon::hash_with_sha256(&concatenated);
+    discharge_macaroon.signature =
+      Macaroon::get_bound_signature(discharge_macaroon.signature.clone(), self.signature.clone());
+  }
+
+  pub(crate) fn get_bound_signature(
+    discharge_macaroon_signature: String,
+    authorising_macaroon_signature: String,
+  ) -> String {
+    let concatenated = format!(
+      "{}{}",
+      discharge_macaroon_signature, authorising_macaroon_signature
+    );
+    Macaroon::hash_with_sha256(&concatenated)
   }
 
   pub fn serialize(&self) -> String {
@@ -167,26 +178,26 @@ mod tests {
     let root_key = "potato";
     let identifier = "test-id";
     let location = Some("https://macaroon.location");
-    let mut macaroon = Macaroon::create(root_key, identifier, location);
-    let original_macaroon_signature = macaroon.signature.clone();
+    let mut original_macaroon = Macaroon::create(root_key, identifier, location);
+    let original_macaroon_signature = original_macaroon.signature.clone();
 
     let caveat_discharge_location = Some("https://auth.bank");
     let caveat_identifier = "caveat-identifier";
     let caveat_root_key = "caveat-root-key";
 
-    macaroon.add_third_party_caveat(
+    original_macaroon.add_third_party_caveat(
       caveat_root_key,
       caveat_identifier,
       caveat_discharge_location,
     );
 
-    let macaroon_first_caveat = macaroon.caveat_list.first().unwrap();
+    let macaroon_first_caveat = original_macaroon.caveat_list.first().unwrap();
     let expected_caveat_root_key = Crypto::decrypt(
       &original_macaroon_signature,
       &macaroon_first_caveat.verification_key_identifier,
     );
 
-    assert_eq!(macaroon.caveat_list.len(), 1);
+    assert_eq!(original_macaroon.caveat_list.len(), 1);
     assert_eq!(
       macaroon_first_caveat.identifier,
       caveat_identifier.to_string()
@@ -233,8 +244,8 @@ mod tests {
     let mut bound_macaroon = discharge_macaroon.clone();
     original_macaroon.bind_for_request(&mut bound_macaroon);
 
-    let concatenated = format!("{}{}", discharge_macaroon.signature, original_macaroon.signature);
-    let expected_bound_signature = Macaroon::hash_with_sha256(&concatenated);
+    let expected_bound_signature =
+      Macaroon::get_bound_signature(discharge_macaroon.signature, original_macaroon.signature);
 
     assert_eq!(bound_macaroon.signature, expected_bound_signature);
 

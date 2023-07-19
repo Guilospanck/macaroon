@@ -8,9 +8,18 @@ pub enum CaveatType {
 
 #[derive(Debug, Clone)]
 pub struct Caveat {
+  /// Location of the service that will discharge it.
   pub location: Option<String>,
+  /// If caveat is 1st party, it is the predicate. Otherwise, 
+  /// it is the identifier of the discharge macaroon.
   pub identifier: String,
+  /// Encrypts the caveat root key (`cK` -
+  /// the root key used to create the macaroon that will discharge this 3rd party caveat)
+  /// with the signature of the authorising (original - `TM`) macaroon as the encryption key.
+  /// 
+  /// `vid = ENC(TM.sig, cK)`
   pub verification_key_identifier: String,
+  /// Either 1st or 3rd party.
   pub(crate) _type: CaveatType,
 }
 
