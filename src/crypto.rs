@@ -83,11 +83,26 @@ mod tests {
   use pretty_assertions::assert_eq;
 
   #[test]
-  fn should_encrypt_and_decrypt_data_correctly() {
+  fn should_encrypt_and_decrypt_data_correctly_with_random_generated_key() {
     let key = Crypto::get_random_key();
     let data = "this is the message that I am going to encrypt and decrypt";
 
     let encrypted = Crypto::encrypt(&key, data);
+    let decrypted = Crypto::decrypt(&key, &encrypted);
+
+    assert_eq!(data.to_string(), decrypted);
+  }
+
+  #[test]
+  fn should_encrypt_and_decrypt_data_correctly_with_some_key() {
+    let key = String::from("ca454e90d6598ee2a0ae871ddf58c8b61543c2efbd2e8e58e216095c7cda3ee1");
+    let data = "this is the message that I am going to encrypt and decrypt";
+
+    let encrypted = Crypto::encrypt(&key, data);
+    let encrypted2 = Crypto::encrypt(&key, data);
+    // asserts that even though the key and the data are the same,
+    // the encryption generated will be different due to nonce
+    assert_ne!(encrypted, encrypted2);
     let decrypted = Crypto::decrypt(&key, &encrypted);
 
     assert_eq!(data.to_string(), decrypted);
