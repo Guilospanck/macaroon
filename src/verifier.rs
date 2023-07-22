@@ -68,19 +68,20 @@ impl Verifier {
     let mut current_signature = Macaroon::get_new_signature(root_key, &macaroon.identifier);
 
     for caveat in macaroon.caveat_list {
+      let vid = caveat.clone().verification_key_identifier;
+      let caveat_id = caveat.clone().identifier;
+
       if caveat.first_party() {
-        if !(self.verify_exact(&caveat.identifier) || self.verify_general(&caveat.identifier)) {
+        current_signature = caveat.update_signature(&current_signature);
+        if !(self.verify_exact(&caveat_id) || self.verify_general(&caveat_id)) {
           return Err(VerifyError::PredicatesNotSatisfied);
         }
-        current_signature = caveat.update_signature(&current_signature);
       }
 
       if caveat.third_party() {
-        let vid = caveat.verification_key_identifier;
-        let caveat_id = caveat.identifier;
-
         // Extracts the caveat root key (cK) from vID
         let caveat_root_key = Crypto::decrypt(&current_signature, &vid);
+        current_signature = caveat.update_signature(&current_signature);
 
         // - Check if there is a discharge macaroon (M') in the vec of
         // discharged macaroons (_M) that:
@@ -88,42 +89,43 @@ impl Verifier {
         //    b) can be recursively verified by invoking M'.verify(TM, cK, _M)
         //    c) Checks that the signature of the current macaroon (M') is a proper
         //       chained MAC signature *bound* to the authorisation macaroon (TM).
-        let mut verified = false;
-        for discharge_macaroon in discharge_macaroons.iter() {
-          // a)
-          if discharge_macaroon.identifier == caveat_id {
+
+        // a)
+        let discharge_macaroon_contain_caveat_id = discharge_macaroons
+          .iter()
+          .find(|discharge_mac| discharge_mac.identifier == caveat_id);
+
+        match discharge_macaroon_contain_caveat_id {
+          Some(discharge_macaroon) => {
             // b)
-            let mut verifier = Verifier::new();
-            for discharge_caveat in discharge_macaroon.caveat_list.iter() {
-              if discharge_caveat.first_party() {
-                verifier.satisfy_exact(discharge_caveat.identifier.as_str());
-              }
-            }
-            let result = verifier.verify(
+            let result = self.verify(
               discharge_macaroon.clone(),
               &caveat_root_key,
               discharge_macaroons.clone(),
             );
-            if result.is_ok() {
-              verified = true;
+            if result.is_err() {
+              return Err(VerifyError::DischargeMacaroonNotVerified);
             }
 
-            // c
-            // TODO: how to check if the signature of M' is bounded to TM.
-            let _bound_signature =
-              Macaroon::get_bound_signature(discharge_macaroon.signature.clone(), current_signature.clone());
-            
-          }
-        }
+            // get original signature of discharge macaroon without being bound to authorisation macaroon
+            let mut discharge_mac_original_sig =
+              Macaroon::get_new_signature(&caveat_root_key, &discharge_macaroon.identifier);
+            for discharge_mac_caveat in discharge_macaroon.caveat_list.iter() {
+              discharge_mac_original_sig =
+                discharge_mac_caveat.update_signature(&discharge_mac_original_sig);
+            }
 
-        if !verified {
-          return Err(VerifyError::DischargeMacaroonNotVerified);
+            // get bound discharge macaroon signature
+            let bound_discharge_macaroon_signature =
+              Macaroon::get_bound_signature(discharge_mac_original_sig, current_signature.clone());
+            // c)
+            if bound_discharge_macaroon_signature != discharge_macaroon.signature {
+              return Err(VerifyError::SignaturesDoNotMatch);
+            }
+          }
+          None => return Err(VerifyError::DischargeMacaroonNotVerified),
         }
       }
-    }
-
-    if macaroon.signature != current_signature {
-      return Err(VerifyError::SignaturesDoNotMatch);
     }
 
     Ok(())

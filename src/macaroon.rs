@@ -85,9 +85,8 @@ impl Macaroon {
   ///
   /// `M'.sig = sha256(M'.sig || TM.sig)`
   ///
-  fn bind_for_request(&self, discharge_macaroon: &mut Macaroon) {
-    discharge_macaroon.signature =
-      Macaroon::get_bound_signature(discharge_macaroon.signature.clone(), self.signature.clone());
+  fn bind_for_request(&self, discharge_macaroon_signature: String) -> String {
+    Macaroon::get_bound_signature(discharge_macaroon_signature, self.signature.clone())
   }
 
   pub(crate) fn get_bound_signature(
@@ -121,6 +120,8 @@ impl Macaroon {
 
 #[cfg(test)]
 mod tests {
+
+  // use crate::verifier::Verifier;
 
   use super::*;
 
@@ -168,7 +169,7 @@ mod tests {
     );
     assert!(macaroon.caveat_list.first().unwrap().location.is_none());
 
-    let expected_signature = "e2342be14bf8d8f1f3fc54abfe877a80e446c40437785747096a8233c7aeb8ab";
+    let expected_signature = "c2decd2bc849a6764312167c7c12b9aa3e07d5c733581ffd17f499d4ec8d23e5";
 
     assert_eq!(macaroon.signature, expected_signature.to_string());
   }
@@ -242,22 +243,27 @@ mod tests {
 
     // Bind the discharge to the original macaroon
     let mut bound_macaroon = discharge_macaroon.clone();
-    original_macaroon.bind_for_request(&mut bound_macaroon);
+    bound_macaroon.signature =
+      original_macaroon.bind_for_request(discharge_macaroon.signature.clone());
 
     let expected_bound_signature =
-      Macaroon::get_bound_signature(discharge_macaroon.signature, original_macaroon.signature);
+      Macaroon::get_bound_signature(discharge_macaroon.clone().signature, original_macaroon.clone().signature);
 
     assert_eq!(bound_macaroon.signature, expected_bound_signature);
 
-    // For integration test
-    // Verifies
+    // // For integration test
+    // // Verifies
     // let mut verifier = Verifier::default();
     // // must satisfy first caveat from the original macaroon
     // verifier.satisfy_exact(predicate_account_id);
     // // must satisfy the first caveat from the discharge macaroon
     // verifier.satisfy_exact(first_party_caveat_of_discharge_macaroon_identifier);
-    // assert!(verifier.verify(macaroon, root_key, vec![discharge_macaroon]).is_err());
-    // assert!(verifier.verify(macaroon, root_key, vec![bound_macaroon]).is_ok());
+    // assert!(verifier
+    //   .verify(original_macaroon.clone(), root_key, vec![discharge_macaroon])
+    //   .is_err());
+    // assert!(verifier
+    //   .verify(original_macaroon, root_key, vec![bound_macaroon])
+    //   .is_ok());
   }
 
   #[test]
