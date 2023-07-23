@@ -9,6 +9,11 @@ on:
 jobs:
   tests:
     name: Run Tests
+    env:
+      PROJECT_NAME_UNDERSCORE: macaroon
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: -Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort
+      RUSTDOCFLAGS: -Cpanic=abort
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -30,7 +35,7 @@ jobs:
 
     # Build 
     - name: Build
-      run: cargo build
+      run: cargo build $CARGO_OPTIONS
 
     # Cache
     - name: Configure cache
@@ -44,6 +49,23 @@ jobs:
           target/
         key: test-${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
 
-    # Tests 
-    - name: Tests
-      run: cargo test --tests
+    # Coverage
+    ##! CARGO_INCREMENTAL, RUSTFLAGS, RUSTDOCFLAGS - added to CARGO_OPTIONS in cargo test needed for code coverage
+    - name: Generate test result and coverage report
+      run: |
+        find . -name '*.gcda' -delete
+        cargo install grcov --force;
+        rm -rf lcov.info;
+        sudo apt install make -y
+        make run-all-tests $CARGO_OPTIONS;    
+        zip -0 ccov.zip `find . \( -name "$PROJECT_NAME_UNDERSCORE*.gc*" \) -print`;
+        grcov ccov.zip -s . -t lcov --llvm --branch --ignore-not-existing --ignore "/*" -o lcov.info;
+
+    # Upload to CodeCov
+    - name: Upload to CodeCov
+      uses: codecov/codecov-action@v3
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      with:
+        files: ./lcov.info
+        fail_ci_if_error: true
