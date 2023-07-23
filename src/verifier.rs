@@ -35,7 +35,7 @@ impl Verifier {
 
   /// Adds a new exact `predicate` to the list of predicates
   /// to be verified when the `verify` function is called.
-  /// 
+  ///
   pub fn satisfy_exact(&mut self, predicate: &str) -> &mut Self {
     // if predicate already exists, it won't add a new one.
     self.predicates.insert(predicate.to_string());
@@ -45,19 +45,19 @@ impl Verifier {
   /// Adds a new general `predicate` (which is a function) to the list of callbacks
   /// to be called in order to verify a predicate when
   /// the `verify` function is called.
-  /// 
+  ///
   pub fn satisfy_general(&mut self, func: CallbackFnVerify) {
     self.callbacks.push(func);
   }
 
   /// Verifies exact predicates that are in the list.
-  /// 
+  ///
   fn verify_exact(&self, predicate: &str) -> bool {
     self.predicates.contains(&predicate.to_string())
   }
 
   /// Verifies general predicates that are in the list.
-  /// 
+  ///
   fn verify_general(&self, predicate: &str) -> bool {
     for callback in self.callbacks.iter() {
       if callback(predicate.to_string()) {
@@ -71,7 +71,7 @@ impl Verifier {
   /// the 1st and 3rd party caveats and discharge macaroons.
   /// Returns `Ok(())` if all of them are succesfully verified and
   /// and `Err(VerifyError)` if not.
-  /// 
+  ///
   pub fn verify(
     &self,
     macaroon: Macaroon,
@@ -86,21 +86,17 @@ impl Verifier {
       let caveat_id = caveat.clone().identifier_or_predicate;
 
       if caveat.first_party() {
-        if self.predicates.is_empty() {
+        current_signature = caveat.get_updated_signature(&current_signature);
+        if self.predicates.is_empty() && self.callbacks.is_empty() {
           continue;
         }
 
-        current_signature = caveat.get_updated_signature(&current_signature);
         if !(self.verify_exact(&caveat_id) || self.verify_general(&caveat_id)) {
           return Err(VerifyError::PredicatesNotSatisfied);
         }
       }
 
       if caveat.third_party() {
-        if self.callbacks.is_empty() {
-          continue;
-        }
-
         // Extracts the caveat root key (cK) from vID
         let caveat_root_key = Crypto::decrypt(&current_signature, &vid);
         current_signature = caveat.get_updated_signature(&current_signature);
@@ -151,7 +147,7 @@ impl Verifier {
       }
     }
 
-    if macaroon.signature.clone() != current_signature
+    if macaroon.signature != current_signature
       && macaroon.signature
         != Macaroon::get_bound_signature(
           current_signature,
@@ -189,7 +185,7 @@ mod tests {
   }
 
   #[test]
-  fn verify_err_when_no_conditions_to_verify() {
+  fn verify_ok_when_no_conditions_to_verify() {
     let root_key = "potato";
     let identifier = "test-id";
     let location = Some("https://some.location");
@@ -203,8 +199,7 @@ mod tests {
     let verifier = Verifier::new();
     let result = verifier.verify(macaroon, root_key, vec![], None);
 
-    assert!(result.is_err());
-    assert_eq!(result.err().unwrap(), VerifyError::SignaturesDoNotMatch);
+    assert!(result.is_ok());
   }
 
   #[test]

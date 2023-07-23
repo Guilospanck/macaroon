@@ -33,11 +33,11 @@ impl Caveat {
   }
 
   /// Returns an updated signature in face of new caveats added.
-  /// 
+  ///
   pub fn get_updated_signature(&self, prev_signature: &str) -> String {
     let first = Macaroon::get_new_signature(prev_signature, &self.verification_key_identifier);
     let second = Macaroon::get_new_signature(prev_signature, &self.identifier_or_predicate);
     let concatenated = format!("{}{}", first, second);
-    return Macaroon::get_new_signature(prev_signature, &concatenated);
+    Macaroon::get_new_signature(prev_signature, &concatenated)
   }
 }
