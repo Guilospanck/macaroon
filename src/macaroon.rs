@@ -120,9 +120,6 @@ impl Macaroon {
 
 #[cfg(test)]
 mod tests {
-
-  // use crate::verifier::Verifier;
-
   use super::*;
 
   #[cfg(test)]
