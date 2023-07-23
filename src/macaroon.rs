@@ -42,7 +42,7 @@ impl Macaroon {
   ///
   fn add_caveat_helper(&mut self, caveat: Caveat) -> &mut Self {
     self.caveat_list.push(caveat.clone());
-    self.signature = caveat.update_signature(&self.signature);
+    self.signature = caveat.get_updated_signature(&self.signature);
     self
   }
 
@@ -52,7 +52,7 @@ impl Macaroon {
   pub fn add_first_party_caveat(&mut self, authorisation_predicate: &str) -> &mut Self {
     self.add_caveat_helper(Caveat {
       location: None,
-      identifier: authorisation_predicate.to_string(),
+      identifier_or_predicate: authorisation_predicate.to_string(),
       verification_key_identifier: "0".to_string(),
       _type: CaveatType::FirstParty,
     })
@@ -75,13 +75,13 @@ impl Macaroon {
     let vid = Crypto::encrypt(&self.signature, caveat_root_key);
     self.add_caveat_helper(Caveat {
       location: location.map(|loc| loc.to_string()),
-      identifier: identifier.to_string(),
+      identifier_or_predicate: identifier.to_string(),
       verification_key_identifier: vid,
       _type: CaveatType::ThirdParty,
     })
   }
 
-  /// Binds the discharging to the authorising macaroon.
+  /// Binds the discharging (`M'`) to the authorising (`TM`) macaroon.
   ///
   /// `M'.sig = sha256(M'.sig || TM.sig)`
   ///
@@ -156,7 +156,7 @@ mod tests {
 
     assert_eq!(macaroon.caveat_list.len(), 1);
     assert_eq!(
-      macaroon.caveat_list.first().unwrap().identifier,
+      macaroon.caveat_list.first().unwrap().identifier_or_predicate,
       authorisation_predicate.to_string()
     );
     assert_eq!(
@@ -200,7 +200,7 @@ mod tests {
 
     assert_eq!(original_macaroon.caveat_list.len(), 1);
     assert_eq!(
-      macaroon_first_caveat.identifier,
+      macaroon_first_caveat.identifier_or_predicate,
       caveat_identifier.to_string()
     );
     assert!(macaroon_first_caveat.location.is_some());

@@ -33,20 +33,31 @@ impl Verifier {
     }
   }
 
+  /// Adds a new exact `predicate` to the list of predicates
+  /// to be verified when the `verify` function is called.
+  /// 
   pub fn satisfy_exact(&mut self, predicate: &str) -> &mut Self {
     // if predicate already exists, it won't add a new one.
     self.predicates.insert(predicate.to_string());
     self
   }
 
+  /// Adds a new general `predicate` (which is a function) to the list of callbacks
+  /// to be called in order to verify a predicate when
+  /// the `verify` function is called.
+  /// 
   pub fn satisfy_general(&mut self, func: CallbackFnVerify) {
     self.callbacks.push(func);
   }
 
+  /// Verifies exact predicates that are in the list.
+  /// 
   fn verify_exact(&self, predicate: &str) -> bool {
     self.predicates.contains(&predicate.to_string())
   }
 
+  /// Verifies general predicates that are in the list.
+  /// 
   fn verify_general(&self, predicate: &str) -> bool {
     for callback in self.callbacks.iter() {
       if callback(predicate.to_string()) {
@@ -72,7 +83,7 @@ impl Verifier {
 
     for caveat in macaroon.caveat_list {
       let vid = caveat.clone().verification_key_identifier;
-      let caveat_id = caveat.clone().identifier;
+      let caveat_id = caveat.clone().identifier_or_predicate;
 
       if caveat.first_party() {
         if self.predicates.is_empty() {
@@ -92,7 +103,7 @@ impl Verifier {
 
         // Extracts the caveat root key (cK) from vID
         let caveat_root_key = Crypto::decrypt(&current_signature, &vid);
-        current_signature = caveat.update_signature(&current_signature);
+        current_signature = caveat.get_updated_signature(&current_signature);
 
         // - Check if there is a discharge macaroon (M') in the vec of
         // discharged macaroons (_M) that:
@@ -124,7 +135,7 @@ impl Verifier {
               Macaroon::get_new_signature(&caveat_root_key, &discharge_macaroon.identifier);
             for discharge_mac_caveat in discharge_macaroon.caveat_list.iter() {
               discharge_mac_original_sig =
-                discharge_mac_caveat.update_signature(&discharge_mac_original_sig);
+                discharge_mac_caveat.get_updated_signature(&discharge_mac_original_sig);
             }
 
             // get bound discharge macaroon signature

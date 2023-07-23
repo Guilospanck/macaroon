@@ -22,7 +22,7 @@ impl Crypto {
     hex::encode(key)
   }
 
-  /// Encrypts data.
+  /// Encrypts data using `XSalsa20Poly1305` (symmetric cryptography).
   ///
   pub fn encrypt(key: &str, data: &str) -> String {
     let key_bytes = hex::decode(key).unwrap();
@@ -39,7 +39,7 @@ impl Crypto {
     hex::encode(ret)
   }
 
-  /// Decrypts data.
+  /// Decrypts data that were encrypted using `XSalsa20Poly1305` (symmetric cryptography).
   ///
   pub fn decrypt(key: &str, data: &str) -> String {
     // get info from the data
