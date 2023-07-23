@@ -85,7 +85,7 @@ impl Macaroon {
   ///
   /// `M'.sig = sha256(M'.sig || TM.sig)`
   ///
-  fn bind_for_request(&self, discharge_macaroon_signature: String) -> String {
+  pub(crate) fn bind_for_request(&self, discharge_macaroon_signature: String) -> String {
     Macaroon::get_bound_signature(discharge_macaroon_signature, self.signature.clone())
   }
 
@@ -250,20 +250,6 @@ mod tests {
       Macaroon::get_bound_signature(discharge_macaroon.clone().signature, original_macaroon.clone().signature);
 
     assert_eq!(bound_macaroon.signature, expected_bound_signature);
-
-    // // For integration test
-    // // Verifies
-    // let mut verifier = Verifier::default();
-    // // must satisfy first caveat from the original macaroon
-    // verifier.satisfy_exact(predicate_account_id);
-    // // must satisfy the first caveat from the discharge macaroon
-    // verifier.satisfy_exact(first_party_caveat_of_discharge_macaroon_identifier);
-    // assert!(verifier
-    //   .verify(original_macaroon.clone(), root_key, vec![discharge_macaroon])
-    //   .is_err());
-    // assert!(verifier
-    //   .verify(original_macaroon, root_key, vec![bound_macaroon])
-    //   .is_ok());
   }
 
   #[test]

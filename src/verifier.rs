@@ -56,14 +56,17 @@ impl Verifier {
     false
   }
 
-  // TODO: what happens if I try to verify something without actually
-  // giving any satisfy predicate?
-
+  /// Verifies if all predicates are satisfied in a macaroon, including
+  /// the 1st and 3rd party caveats and discharge macaroons.
+  /// Returns `Ok(())` if all of them are succesfully verified and
+  /// and `Err(VerifyError)` if not.
+  /// 
   pub fn verify(
     &self,
     macaroon: Macaroon,
     root_key: &str,
     discharge_macaroons: Vec<Macaroon>,
+    parent_signature: Option<&str>,
   ) -> Result<(), VerifyError> {
     let mut current_signature = Macaroon::get_new_signature(root_key, &macaroon.identifier);
 
@@ -72,13 +75,21 @@ impl Verifier {
       let caveat_id = caveat.clone().identifier;
 
       if caveat.first_party() {
-        current_signature = caveat.update_signature(&current_signature);
+        if self.predicates.is_empty() {
+          continue;
+        }
+
+        current_signature = caveat.get_updated_signature(&current_signature);
         if !(self.verify_exact(&caveat_id) || self.verify_general(&caveat_id)) {
           return Err(VerifyError::PredicatesNotSatisfied);
         }
       }
 
       if caveat.third_party() {
+        if self.callbacks.is_empty() {
+          continue;
+        }
+
         // Extracts the caveat root key (cK) from vID
         let caveat_root_key = Crypto::decrypt(&current_signature, &vid);
         current_signature = caveat.update_signature(&current_signature);
@@ -102,6 +113,7 @@ impl Verifier {
               discharge_macaroon.clone(),
               &caveat_root_key,
               discharge_macaroons.clone(),
+              Some(current_signature.clone().as_str()),
             );
             if result.is_err() {
               return Err(VerifyError::DischargeMacaroonNotVerified);
@@ -128,107 +140,210 @@ impl Verifier {
       }
     }
 
+    if macaroon.signature.clone() != current_signature
+      && macaroon.signature
+        != Macaroon::get_bound_signature(
+          current_signature,
+          parent_signature.unwrap_or("").to_string(),
+        )
+    {
+      return Err(VerifyError::SignaturesDoNotMatch);
+    }
+
     Ok(())
   }
 }
 
-// #[cfg(test)]
-// mod tests {
-//   use super::*;
+#[cfg(test)]
+mod tests {
+  use super::*;
 
-//   #[cfg(test)]
-//   use pretty_assertions::assert_eq;
+  #[cfg(test)]
+  use pretty_assertions::assert_eq;
 
-//   fn general_predicate_fn(predicate: String) -> bool {
-//     if !predicate.starts_with("another") {
-//       return false;
-//     }
-//     let split = predicate.split(" = ").next();
-//     match split {
-//       Some(remainder) => {
-//         if remainder != "another" {
-//           return false;
-//         }
-//         true
-//       }
-//       None => false,
-//     }
-//   }
+  fn general_predicate_fn(predicate: String) -> bool {
+    if !predicate.starts_with("another") {
+      return false;
+    }
+    let split = predicate.split(" = ").next();
+    match split {
+      Some(remainder) => {
+        if remainder != "another" {
+          return false;
+        }
+        true
+      }
+      None => false,
+    }
+  }
 
-//   #[test]
-//   fn verify_ok_when_caveats_and_satisfy_conditions_match() {
-//     let root_key = "potato";
-//     let identifier = "test-id";
-//     let location = Some("https://some.location");
-//     let authorisation_predicate = "potato = larry";
-//     let another_authorisation_predicate = "another = one";
+  #[test]
+  fn verify_err_when_no_conditions_to_verify() {
+    let root_key = "potato";
+    let identifier = "test-id";
+    let location = Some("https://some.location");
+    let authorisation_predicate = "potato = larry";
+    let another_authorisation_predicate = "another = one";
 
-//     let mut macaroon = Macaroon::create(root_key, identifier, location);
-//     macaroon.add_first_party_caveat(authorisation_predicate);
-//     macaroon.add_first_party_caveat(another_authorisation_predicate);
+    let mut macaroon = Macaroon::create(root_key, identifier, location);
+    macaroon.add_first_party_caveat(authorisation_predicate);
+    macaroon.add_first_party_caveat(another_authorisation_predicate);
 
-//     let mut verifier = Verifier::new();
-//     verifier.satisfy_exact(authorisation_predicate);
-//     verifier.satisfy_general(general_predicate_fn);
-//     let result = verifier.verify(macaroon, root_key);
+    let verifier = Verifier::new();
+    let result = verifier.verify(macaroon, root_key, vec![], None);
 
-//     assert!(result.is_ok());
-//   }
+    assert!(result.is_err());
+    assert_eq!(result.err().unwrap(), VerifyError::SignaturesDoNotMatch);
+  }
 
-//   #[test]
-//   fn verify_ok_when_all_caveats_are_satisfied_by_at_least_one_condition() {
-//     let root_key = "potato";
-//     let identifier = "test-id";
-//     let location = Some("https://some.location");
-//     let authorisation_predicate = "potato = larry";
+  #[test]
+  fn verify_ok_when_caveats_and_satisfy_conditions_match() {
+    let root_key = "potato";
+    let identifier = "test-id";
+    let location = Some("https://some.location");
+    let authorisation_predicate = "potato = larry";
+    let another_authorisation_predicate = "another = one";
 
-//     let mut macaroon = Macaroon::create(root_key, identifier, location);
-//     macaroon.add_first_party_caveat(authorisation_predicate);
+    let mut macaroon = Macaroon::create(root_key, identifier, location);
+    macaroon.add_first_party_caveat(authorisation_predicate);
+    macaroon.add_first_party_caveat(another_authorisation_predicate);
 
-//     let mut verifier = Verifier::new();
-//     verifier.satisfy_exact(authorisation_predicate);
-//     verifier.satisfy_general(general_predicate_fn);
+    let mut verifier = Verifier::new();
+    verifier.satisfy_exact(authorisation_predicate);
+    verifier.satisfy_general(general_predicate_fn);
+    let result = verifier.verify(macaroon, root_key, vec![], None);
 
-//     let result = verifier.verify(macaroon, root_key);
+    assert!(result.is_ok());
+  }
 
-//     // Even though we have one caveat and two satisfy conditions,
-//     // if the caveat is satisfied in one of them, we are good to go.
-//     assert!(result.is_ok());
-//   }
+  #[test]
+  fn verify_ok_when_all_caveats_are_satisfied_by_at_least_one_condition() {
+    let root_key = "potato";
+    let identifier = "test-id";
+    let location = Some("https://some.location");
+    let authorisation_predicate = "potato = larry";
 
-//   #[test]
-//   fn verify_throw_err_when_predicates_dont_match() {
-//     let root_key = "potato";
-//     let identifier = "test-id";
-//     let location = Some("https://some.location");
-//     let authorisation_predicate = "potato = larry";
+    let mut macaroon = Macaroon::create(root_key, identifier, location);
+    macaroon.add_first_party_caveat(authorisation_predicate);
 
-//     let mut macaroon = Macaroon::create(root_key, identifier, location);
-//     macaroon.add_first_party_caveat(authorisation_predicate);
+    let mut verifier = Verifier::new();
+    verifier.satisfy_exact(authorisation_predicate);
+    verifier.satisfy_general(general_predicate_fn);
 
-//     let mut verifier = Verifier::new();
-//     verifier.satisfy_exact("another = thing");
-//     let result = verifier.verify(macaroon, root_key);
+    let result = verifier.verify(macaroon, root_key, vec![], None);
 
-//     assert!(result.is_err());
-//     assert_eq!(result.err().unwrap(), VerifyError::PredicatesNotSatisfied);
-//   }
+    // Even though we have one caveat and two satisfy conditions,
+    // if the caveat is satisfied in one of them, we are good to go.
+    assert!(result.is_ok());
+  }
 
-//   #[test]
-//   fn verify_throw_err_when_signatures_dont_match() {
-//     let root_key = "potato";
-//     let identifier = "test-id";
-//     let location = Some("https://some.location");
-//     let authorisation_predicate = "potato = larry";
+  #[test]
+  fn verify_throw_err_when_predicates_dont_match() {
+    let root_key = "potato";
+    let identifier = "test-id";
+    let location = Some("https://some.location");
+    let authorisation_predicate = "potato = larry";
 
-//     let mut macaroon = Macaroon::create(root_key, identifier, location);
-//     macaroon.add_first_party_caveat(authorisation_predicate);
+    let mut macaroon = Macaroon::create(root_key, identifier, location);
+    macaroon.add_first_party_caveat(authorisation_predicate);
 
-//     let mut verifier = Verifier::new();
-//     verifier.satisfy_exact(authorisation_predicate);
-//     let result = verifier.verify(macaroon, "another_root_key");
+    let mut verifier = Verifier::new();
+    verifier.satisfy_exact("another = thing");
+    let result = verifier.verify(macaroon, root_key, vec![], None);
 
-//     assert!(result.is_err());
-//     assert_eq!(result.err().unwrap(), VerifyError::SignaturesDoNotMatch);
-//   }
-// }
+    assert!(result.is_err());
+    assert_eq!(result.err().unwrap(), VerifyError::PredicatesNotSatisfied);
+  }
+
+  #[test]
+  fn verify_throw_err_when_signatures_dont_match() {
+    let root_key = "potato";
+    let identifier = "test-id";
+    let location = Some("https://some.location");
+    let authorisation_predicate = "potato = larry";
+
+    let mut macaroon = Macaroon::create(root_key, identifier, location);
+    macaroon.add_first_party_caveat(authorisation_predicate);
+
+    let mut verifier = Verifier::new();
+    verifier.satisfy_exact(authorisation_predicate);
+    let result = verifier.verify(macaroon, "another_root_key", vec![], None);
+
+    assert!(result.is_err());
+    assert_eq!(result.err().unwrap(), VerifyError::SignaturesDoNotMatch);
+  }
+
+  #[test]
+  fn verify_third_party_caveat_with_discharge_macaroons() {
+    let root_key = "potato";
+    let identifier = "test-id";
+    let location = Some("https://macaroon.location");
+    let mut original_macaroon = Macaroon::create(root_key, identifier, location);
+    let predicate_account_id = "account_id = 007";
+    original_macaroon.add_first_party_caveat(predicate_account_id);
+
+    // Adds 3rd party caveat to the original macaroon
+    let caveat_discharge_location = Some("https://auth.bank");
+    let caveat_identifier = "caveat-identifier";
+    let caveat_root_key = "caveat-root-key";
+
+    original_macaroon.add_third_party_caveat(
+      caveat_root_key,
+      caveat_identifier,
+      caveat_discharge_location,
+    );
+
+    // Creates the discharge macaroon that will be responsible for
+    // handling the 3rd party caveat just created.
+    let mut discharge_macaroon = Macaroon::create(
+      caveat_root_key,
+      caveat_identifier,
+      caveat_discharge_location,
+    );
+    let first_party_caveat_of_discharge_macaroon_identifier = "time < 2023-07-09T00:00:00Z";
+    discharge_macaroon.add_first_party_caveat(first_party_caveat_of_discharge_macaroon_identifier);
+
+    // Bind the discharge to the original macaroon
+    let mut bound_macaroon = discharge_macaroon.clone();
+    bound_macaroon.signature =
+      original_macaroon.bind_for_request(discharge_macaroon.signature.clone());
+
+    let expected_bound_signature = Macaroon::get_bound_signature(
+      discharge_macaroon.clone().signature,
+      original_macaroon.clone().signature,
+    );
+
+    assert_eq!(bound_macaroon.signature, expected_bound_signature);
+
+    let mut verifier = Verifier::default();
+    // must satisfy first caveat from the original macaroon
+    verifier.satisfy_exact(predicate_account_id);
+    // must satisfy the first caveat from the discharge macaroon
+    verifier.satisfy_exact(first_party_caveat_of_discharge_macaroon_identifier);
+
+    // get verified result from discharge macaroon that DOES NOT have the signature bound to the authorisation macaroon
+    let discharge_macaroon_with_signature_not_bound_to_authorisation_macaroon_verifier = verifier
+      .verify(
+        original_macaroon.clone(),
+        root_key,
+        vec![discharge_macaroon],
+        None,
+      );
+
+    assert!(
+      discharge_macaroon_with_signature_not_bound_to_authorisation_macaroon_verifier.is_err()
+    );
+    assert_eq!(
+      discharge_macaroon_with_signature_not_bound_to_authorisation_macaroon_verifier
+        .err()
+        .unwrap(),
+      VerifyError::SignaturesDoNotMatch
+    );
+
+    // get verified result from discharge macaroon that DOES have the signature bound to the authorisation macaroon
+    let discharge_macaroon_with_signature_bound_to_authorisation_macaroon_verifier =
+      verifier.verify(original_macaroon, root_key, vec![bound_macaroon], None);
+
+    assert!(discharge_macaroon_with_signature_bound_to_authorisation_macaroon_verifier.is_ok());
+  }
+}
