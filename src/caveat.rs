@@ -1,12 +1,14 @@
+use serde::{Deserialize, Serialize};
+
 use crate::macaroon::Macaroon;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Eq)]
 pub enum CaveatType {
   FirstParty,
   ThirdParty,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Caveat {
   /// Location of the service that will discharge it.
   pub location: Option<String>,

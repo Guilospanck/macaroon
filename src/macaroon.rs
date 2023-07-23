@@ -3,9 +3,10 @@ use crate::{
   crypto::Crypto,
 };
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Macaroon {
   pub identifier: String,
   pub caveat_list: Vec<Caveat>,
@@ -101,7 +102,11 @@ impl Macaroon {
   }
 
   pub fn serialize(&self) -> String {
-    "".to_string()
+    serde_json::to_string(self).unwrap()
+  }
+
+  pub fn deserialize(data: &str) -> Self {
+    serde_json::from_str(data).unwrap()
   }
 
   /// Helper to HMAC-hash an identifier using a secret.
@@ -153,7 +158,11 @@ mod tests {
 
     assert_eq!(macaroon.caveat_list.len(), 1);
     assert_eq!(
-      macaroon.caveat_list.first().unwrap().identifier_or_predicate,
+      macaroon
+        .caveat_list
+        .first()
+        .unwrap()
+        .identifier_or_predicate,
       authorisation_predicate.to_string()
     );
     assert_eq!(
@@ -243,8 +252,10 @@ mod tests {
     bound_macaroon.signature =
       original_macaroon.bind_for_request(discharge_macaroon.signature.clone());
 
-    let expected_bound_signature =
-      Macaroon::get_bound_signature(discharge_macaroon.clone().signature, original_macaroon.clone().signature);
+    let expected_bound_signature = Macaroon::get_bound_signature(
+      discharge_macaroon.clone().signature,
+      original_macaroon.clone().signature,
+    );
 
     assert_eq!(bound_macaroon.signature, expected_bound_signature);
   }
@@ -257,5 +268,34 @@ mod tests {
 
     let signature = Macaroon::get_new_signature(root_key, identifier);
     assert_eq!(signature, expected_signature.to_string());
+  }
+
+  #[test]
+  fn serialize_and_deserialize() {
+    let root_key = "potato";
+    let identifier = "test-id";
+    let location = None;
+
+    let mut macaroon = Macaroon::create(root_key, identifier, location);
+
+    // Adds 1st party caveat
+    let predicate_account_id = "account_id = 007";
+    macaroon.add_first_party_caveat(predicate_account_id);
+
+    // Adds 3rd party caveat
+    let caveat_discharge_location = Some("https://auth.bank");
+    let caveat_identifier = "caveat-identifier";
+    let caveat_root_key = "caveat-root-key";
+
+    macaroon.add_third_party_caveat(
+      caveat_root_key,
+      caveat_identifier,
+      caveat_discharge_location,
+    );
+
+    let serialized = macaroon.serialize();
+    let deserialized = Macaroon::deserialize(&serialized);
+
+    assert_eq!(deserialized, macaroon);
   }
 }
